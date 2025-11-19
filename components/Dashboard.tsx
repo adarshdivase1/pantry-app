@@ -9,26 +9,34 @@ const Dashboard: React.FC = () => {
   const [filter, setFilter] = useState<'active' | 'completed'>('active');
 
   const refreshData = async () => {
+      console.log('🔄 Refreshing dashboard data...');
       const o = await getOrders();
       const l = await getLowStockItems(10);
       setOrders(o);
       setLowStockItems(l);
+      console.log(`📊 Loaded ${o.length} orders`);
   };
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(refreshData, 5000); // Polling backup
-    const handleUpdate = () => refreshData();
+    
+    // Listen for real-time updates
+    const handleUpdate = () => {
+        console.log('🔔 Dashboard received update notification');
+        refreshData();
+    };
+    
     window.addEventListener('pantry-update', handleUpdate);
+    
     return () => {
-        clearInterval(interval);
         window.removeEventListener('pantry-update', handleUpdate);
     };
   }, []);
 
   const handleStatusChange = async (id: string, status: OrderStatus) => {
+      console.log(`🔄 Changing order ${id} to ${status}`);
       await updateOrderStatus(id, status);
-      refreshData();
+      // Data will refresh via real-time event
   };
 
   const filteredOrders = orders.filter(o => {
@@ -43,7 +51,7 @@ const Dashboard: React.FC = () => {
         <header className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
             <div>
                 <h2 className="text-lg font-bold text-slate-800">Order Queue</h2>
-                <p className="text-xs text-slate-500">Manage incoming service requests</p>
+                <p className="text-xs text-slate-500">Manage incoming service requests • Live Updates Active</p>
             </div>
             <div className="flex bg-slate-200 p-1 rounded-lg">
                 {['active', 'completed'].map((f) => (
@@ -63,10 +71,11 @@ const Dashboard: React.FC = () => {
                 <div className="flex flex-col items-center justify-center h-full opacity-60">
                     <Coffee className="w-12 h-12 text-slate-300 mb-3" />
                     <p className="text-slate-500 font-medium">No {filter} orders</p>
+                    <p className="text-xs text-slate-400 mt-1">Orders will appear here in real-time</p>
                 </div>
             ) : (
                 filteredOrders.map(order => (
-                    <div key={order.id} className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex flex-col md:flex-row gap-4">
+                    <div key={order.id} className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex flex-col md:flex-row gap-4 animate-in fade-in duration-300">
                         <div className="flex-1">
                             <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center gap-3">
