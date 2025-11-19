@@ -54,7 +54,7 @@ const Inventory: React.FC<InventoryProps> = ({ items, isStaff, onDelete }) => {
     });
   };
 
-  const submitOrder = () => {
+  const submitOrder = async () => {
       if (!roomNumber) return alert("Please enter a room number");
       setSubmitting(true);
       
@@ -65,8 +65,8 @@ const Inventory: React.FC<InventoryProps> = ({ items, isStaff, onDelete }) => {
           unit: c.item.unit
       }));
 
-      setTimeout(() => {
-        const result = placeOrder({
+      try {
+        const result = await placeOrder({
           id: crypto.randomUUID(),
           roomNumber,
           items: orderItems,
@@ -74,7 +74,6 @@ const Inventory: React.FC<InventoryProps> = ({ items, isStaff, onDelete }) => {
           timestamp: new Date().toISOString()
         });
         
-        setSubmitting(false);
         if (result.success) {
             setCart([]);
             setIsCheckingOut(false);
@@ -84,7 +83,11 @@ const Inventory: React.FC<InventoryProps> = ({ items, isStaff, onDelete }) => {
             alert(result.error || "Failed.");
             setIsCheckingOut(false);
         }
-      }, 500);
+      } catch (e) {
+        alert("An error occurred");
+      } finally {
+        setSubmitting(false);
+      }
   };
 
   return (

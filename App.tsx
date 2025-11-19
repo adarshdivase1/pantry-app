@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { View, PantryItem } from './types';
-import { getItems, saveItems, seedInitialData, addOrUpdateItem } from './services/storageService';
+import { getItems, seedInitialData, addOrUpdateItem, deleteItem } from './services/storageService';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard'; // Order Queue (Staff)
 import Inventory from './components/Inventory'; // Catalog (Room) or Menu Manager (Staff)
 import ShoppingList from './components/ShoppingList'; // Order History (Room)
 import AddItemModal from './components/AddItemModal';
+import SettingsModal from './components/SettingsModal';
 
 const App: React.FC = () => {
   // Role State: 'room' (default) or 'staff'
@@ -14,11 +15,20 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('inventory');
   const [items, setItems] = useState<PantryItem[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch Data function
+  const loadItems = async () => {
+      const data = await getItems();
+      setItems(data);
+      setIsLoading(false);
+  };
 
   // Initial load
   useEffect(() => {
-    const data = seedInitialData();
-    setItems(data);
+    seedInitialData(); // Only runs if local
+    loadItems();
     
     if (isStaff) setCurrentView('dashboard');
     else setCurrentView('inventory');
@@ -27,43 +37,35 @@ const App: React.FC = () => {
   // Real-time Synchronization
   useEffect(() => {
     const handleStorageChange = () => {
-      console.log("Refreshing data from storage...");
-      setItems(getItems());
+      console.log("Refreshing data...");
+      loadItems();
     };
 
-    // Listen for local changes (same tab)
+    // Listen for event dispatched by storageService (covers local and supabase)
     window.addEventListener('pantry-update', handleStorageChange);
     
-    // Listen for cross-tab changes
-    window.addEventListener('storage', handleStorageChange);
-
     return () => {
       window.removeEventListener('pantry-update', handleStorageChange);
-      window.removeEventListener('storage', handleStorageChange);
     };
   }, []);
 
-  const handleAddItem = (newItem: Omit<PantryItem, 'id' | 'addedDate'>) => {
-    // Use the new smart service that handles deduplication
-    const result = addOrUpdateItem(newItem);
-    
-    // Refresh UI immediately (though event listener will also catch it)
-    setItems(getItems());
-    
+  const handleAddItem = async (newItem: Omit<PantryItem, 'id' | 'addedDate'>) => {
+    const result = await addOrUpdateItem(newItem);
     if (result.success) {
-        // Optional: Show a toast notification here
-        console.log(result.message);
+        loadItems();
     }
   };
 
-  const handleDeleteItem = (id: string) => {
+  const handleDeleteItem = async (id: string) => {
     if (window.confirm('Delete this item from the menu?')) {
-      const updated = items.filter(i => i.id !== id);
-      saveItems(updated);
+      await deleteItem(id);
+      loadItems();
     }
   };
 
   const renderView = () => {
+    if (isLoading) return <div className="h-full flex items-center justify-center"><div className="animate-spin h-8 w-8 border-4 border-primary-500 border-t-transparent rounded-full"></div></div>;
+
     switch (currentView) {
       // Staff Views
       case 'dashboard':
@@ -87,6 +89,7 @@ const App: React.FC = () => {
         onAddClick={() => setIsAddModalOpen(true)}
         isStaff={isStaff}
         toggleRole={() => setIsStaff(!isStaff)}
+        onSettingsClick={() => setIsSettingsOpen(true)}
       />
       
       <main className="flex-1 overflow-y-auto h-full relative">
@@ -99,6 +102,11 @@ const App: React.FC = () => {
         isOpen={isAddModalOpen} 
         onClose={() => setIsAddModalOpen(false)} 
         onAdd={handleAddItem} 
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
       />
     </div>
   );

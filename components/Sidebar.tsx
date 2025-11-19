@@ -8,9 +8,10 @@ interface SidebarProps {
   onAddClick: () => void;
   isStaff: boolean;
   toggleRole: () => void;
+  onSettingsClick: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onAddClick, isStaff, toggleRole }) => {
+const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onAddClick, isStaff, toggleRole, onSettingsClick }) => {
   const staffNavItems = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
     { id: 'inventory', label: 'Inventory', icon: Package },
@@ -70,14 +71,22 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, onAddClick, isS
             </button>
         )}
 
-        <button
-            onClick={toggleRole}
-            className="w-full flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white py-2.5 rounded-lg transition-all text-sm font-medium border border-slate-700 hover:border-slate-600"
-            title="Switch User Role (Demo)"
-        >
-            {isStaff ? <Users className="w-4 h-4" /> : <UserCircle className="w-4 h-4" />}
-            <span className="ml-2 hidden lg:block">{isStaff ? 'Staff Mode' : 'Guest Mode'}</span>
-        </button>
+        <div className="flex gap-2">
+            <button
+                onClick={toggleRole}
+                className="flex-1 flex items-center justify-center bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white py-2.5 rounded-lg transition-all text-sm font-medium border border-slate-700 hover:border-slate-600"
+                title="Switch User Role (Demo)"
+            >
+                {isStaff ? <Users className="w-4 h-4" /> : <UserCircle className="w-4 h-4" />}
+            </button>
+            <button
+                onClick={onSettingsClick}
+                className="flex items-center justify-center px-3 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-all border border-slate-700 hover:border-slate-600"
+                title="Settings"
+            >
+                <Settings className="w-4 h-4" />
+            </button>
+        </div>
       </div>
     </div>
   );

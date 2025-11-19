@@ -10,16 +10,21 @@ interface ShoppingListProps {
 const ShoppingList: React.FC<ShoppingListProps> = () => {
   const [orders, setOrders] = useState<Order[]>([]);
 
-  const refreshOrders = () => {
+  const refreshOrders = async () => {
       // For demo purposes, we load ALL orders. In a real app, we'd filter by the current user/room session.
-      const all = getOrders();
+      const all = await getOrders();
       setOrders(all);
   };
 
   useEffect(() => {
     refreshOrders();
     const interval = setInterval(refreshOrders, 3000);
-    return () => clearInterval(interval);
+    const handleUpdate = () => refreshOrders();
+    window.addEventListener('pantry-update', handleUpdate);
+    return () => {
+        clearInterval(interval);
+        window.removeEventListener('pantry-update', handleUpdate);
+    };
   }, []);
 
   const getStatusIcon = (status: string) => {

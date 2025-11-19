@@ -8,14 +8,16 @@ const Dashboard: React.FC = () => {
   const [lowStockItems, setLowStockItems] = useState<PantryItem[]>([]);
   const [filter, setFilter] = useState<'active' | 'completed'>('active');
 
-  const refreshData = () => {
-      setOrders(getOrders());
-      setLowStockItems(getLowStockItems(10));
+  const refreshData = async () => {
+      const o = await getOrders();
+      const l = await getLowStockItems(10);
+      setOrders(o);
+      setLowStockItems(l);
   };
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(refreshData, 5000); 
+    const interval = setInterval(refreshData, 5000); // Polling backup
     const handleUpdate = () => refreshData();
     window.addEventListener('pantry-update', handleUpdate);
     return () => {
@@ -24,7 +26,10 @@ const Dashboard: React.FC = () => {
     };
   }, []);
 
-  const handleStatusChange = (id: string, status: OrderStatus) => updateOrderStatus(id, status);
+  const handleStatusChange = async (id: string, status: OrderStatus) => {
+      await updateOrderStatus(id, status);
+      refreshData();
+  };
 
   const filteredOrders = orders.filter(o => {
       if (filter === 'active') return o.status === 'pending' || o.status === 'preparing';
