@@ -3,27 +3,19 @@ import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabas
 
 const ITEMS_KEY = 'pantry_service_items_v2';
 const ORDERS_KEY = 'pantry_service_orders_v2';
-const SUPABASE_CONFIG_KEY = 'pantry_supabase_config';
 
 let supabase: SupabaseClient | null = null;
 let realtimeChannel: RealtimeChannel | null = null;
 
-// --- Configuration ---
+// --- Auto-Initialize from Environment Variables ---
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export interface SupabaseConfig {
-  url: string;
-  key: string;
-}
-
-export const getSupabaseConfig = (): SupabaseConfig | null => {
-  const data = localStorage.getItem(SUPABASE_CONFIG_KEY);
-  return data ? JSON.parse(data) : null;
-};
-
-export const initSupabase = (config: SupabaseConfig) => {
-  localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(config));
+// Initialize Supabase automatically if env vars are present
+if (SUPABASE_URL && SUPABASE_ANON_KEY) {
   try {
-    supabase = createClient(config.url, config.key, {
+    console.log('🔌 Initializing Supabase from environment variables...');
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       realtime: {
         params: {
           eventsPerSecond: 10
@@ -31,40 +23,23 @@ export const initSupabase = (config: SupabaseConfig) => {
       }
     });
     setupRealtime();
-    return true;
+    console.log('✅ Supabase connected successfully!');
   } catch (e) {
-    console.error("Invalid Supabase Config", e);
-    return false;
+    console.error('❌ Failed to initialize Supabase:', e);
   }
-};
-
-export const disconnectSupabase = () => {
-    if (realtimeChannel) {
-        realtimeChannel.unsubscribe();
-        realtimeChannel = null;
-    }
-    localStorage.removeItem(SUPABASE_CONFIG_KEY);
-    supabase = null;
-    notifyChange();
-}
-
-// Attempt auto-init
-const savedConfig = getSupabaseConfig();
-if (savedConfig) {
-  initSupabase(savedConfig);
+} else {
+  console.warn('⚠️ No Supabase credentials found. Running in local-only mode.');
 }
 
 const setupRealtime = () => {
     if (!supabase) return;
     
-    // Unsubscribe from previous channel if exists
     if (realtimeChannel) {
         realtimeChannel.unsubscribe();
     }
     
     console.log('🔄 Setting up real-time subscriptions...');
     
-    // Create a single channel for all tables
     realtimeChannel = supabase
         .channel('db-changes')
         .on(
@@ -99,17 +74,14 @@ const setupRealtime = () => {
         });
 }
 
-// --- Event System ---
 export const notifyChange = () => {
   console.log('🔔 Broadcasting data update...');
   window.dispatchEvent(new Event('pantry-update'));
 };
 
-// --- Helper for Local vs Cloud ---
-
 const isCloud = () => !!supabase;
 
-// --- Items Management ---
+export const isUsingCloudStorage = () => isCloud();
 
 export const getItems = async (): Promise<PantryItem[]> => {
   if (isCloud()) {
@@ -155,7 +127,6 @@ export const addOrUpdateItem = async (newItem: Omit<PantryItem, 'id' | 'addedDat
                 .eq('id', existingItem.id);
             
             if (error) return { success: false, message: error.message };
-            // Real-time will trigger notifyChange automatically
             return { success: true, message: `Restocked ${existingItem.name}` };
         } else {
             const { error } = await supabase!
@@ -169,7 +140,6 @@ export const addOrUpdateItem = async (newItem: Omit<PantryItem, 'id' | 'addedDat
                     expiry_date: newItem.expiryDate
                 }]);
             if (error) return { success: false, message: error.message };
-            // Real-time will trigger notifyChange automatically
             return { success: true, message: `Added ${newItem.name}` };
         }
     } else {
@@ -200,7 +170,6 @@ export const deleteItem = async (id: string) => {
     if (isCloud()) {
         const { error } = await supabase!.from('pantry_items').delete().eq('id', id);
         if (error) console.error('Delete error:', error);
-        // Real-time will trigger notifyChange automatically
     } else {
         const items = await getItems();
         const updated = items.filter(i => i.id !== id);
@@ -208,8 +177,6 @@ export const deleteItem = async (id: string) => {
         notifyChange();
     }
 };
-
-// --- Orders Management ---
 
 export const getOrders = async (): Promise<Order[]> => {
   if (isCloud()) {
@@ -235,7 +202,6 @@ export const getOrders = async (): Promise<Order[]> => {
 export const placeOrder = async (order: Order): Promise<{ success: boolean; error?: string }> => {
     const items = await getItems();
 
-    // 1. Validate Stock
     for (const orderItem of order.items) {
         const item = items.find(i => i.id === orderItem.itemId);
         if (!item) {
@@ -249,7 +215,6 @@ export const placeOrder = async (order: Order): Promise<{ success: boolean; erro
     if (isCloud()) {
         console.log('📝 Placing order:', order);
         
-        // Insert Order
         const { error: orderError } = await supabase!.from('orders').insert([{
             id: order.id,
             room_number: order.roomNumber,
@@ -263,7 +228,6 @@ export const placeOrder = async (order: Order): Promise<{ success: boolean; erro
             return { success: false, error: orderError.message };
         }
 
-        // Deduct Stock
         for (const orderItem of order.items) {
             const item = items.find(i => i.id === orderItem.itemId);
             if (item) {
@@ -278,7 +242,6 @@ export const placeOrder = async (order: Order): Promise<{ success: boolean; erro
         }
         
         console.log('✅ Order placed successfully!');
-        // Real-time will trigger notifyChange automatically
         return { success: true };
     } else {
         const orders = await getOrders();
@@ -309,7 +272,6 @@ export const updateOrderStatus = async (orderId: string, status: Order['status']
         } else {
             console.log('✅ Order status updated!');
         }
-        // Real-time will trigger notifyChange automatically
     } else {
         const orders = await getOrders();
         const index = orders.findIndex(o => o.id === orderId);
@@ -327,7 +289,6 @@ export const getLowStockItems = async (threshold = 10): Promise<PantryItem[]> =>
     return items.filter(i => i.quantity <= threshold && i.quantity > 0);
 };
 
-// --- Seeding ---
 export const seedInitialData = async () => {
     const existing = await getItems();
     if (existing.length > 0) return;
@@ -357,11 +318,4 @@ export const seedInitialData = async () => {
     }
     
     console.log('✅ Sample data seeded successfully!');
-};
-
-// Function to manually trigger seeding (useful for admin)
-export const forceSeedData = async () => {
-    const items = await getItems();
-    await Promise.all(items.map(item => deleteItem(item.id)));
-    await seedInitialData();
 };
