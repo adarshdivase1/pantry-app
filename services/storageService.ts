@@ -8,29 +8,10 @@ let supabase: SupabaseClient | null = null;
 let realtimeChannel: RealtimeChannel | null = null;
 
 // --- Auto-Initialize from Environment Variables ---
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_ANON_KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-// Initialize Supabase automatically if env vars are present
-if (SUPABASE_URL && SUPABASE_ANON_KEY) {
-  try {
-    console.log('🔌 Initializing Supabase from environment variables...');
-    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      realtime: {
-        params: {
-          eventsPerSecond: 10
-        }
-      }
-    });
-    setupRealtime();
-    console.log('✅ Supabase connected successfully!');
-  } catch (e) {
-    console.error('❌ Failed to initialize Supabase:', e);
-  }
-} else {
-  console.warn('⚠️ No Supabase credentials found. Running in local-only mode.');
-}
-
+// Declare setupRealtime before using it
 const setupRealtime = () => {
     if (!supabase) return;
     
@@ -72,7 +53,66 @@ const setupRealtime = () => {
                 console.log('✅ Real-time sync is active!');
             }
         });
+};
+
+// Initialize Supabase automatically if env vars are present
+if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+  try {
+    console.log('🔌 Initializing Supabase from environment variables...');
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      realtime: {
+        params: {
+          eventsPerSecond: 10
+        }
+      }
+    });
+    setupRealtime();
+    console.log('✅ Supabase connected successfully!');
+  } catch (e) {
+    console.error('❌ Failed to initialize Supabase:', e);
+  }
+} else {
+  console.warn('⚠️ No Supabase credentials found. Running in local-only mode.');
 }
+
+// Export functions for SettingsModal
+export const initSupabase = (config: { url: string; key: string }): boolean => {
+  try {
+    supabase = createClient(config.url, config.key, {
+      realtime: {
+        params: {
+          eventsPerSecond: 10
+        }
+      }
+    });
+    setupRealtime();
+    // Store config in localStorage for persistence
+    localStorage.setItem('supabase_config', JSON.stringify(config));
+    return true;
+  } catch (e) {
+    console.error('Failed to initialize Supabase:', e);
+    return false;
+  }
+};
+
+export const getSupabaseConfig = (): { url: string; key: string } | null => {
+  const stored = localStorage.getItem('supabase_config');
+  if (stored) {
+    return JSON.parse(stored);
+  }
+  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+    return { url: SUPABASE_URL, key: SUPABASE_ANON_KEY };
+  }
+  return null;
+};
+
+export const disconnectSupabase = () => {
+  if (realtimeChannel) {
+    realtimeChannel.unsubscribe();
+  }
+  supabase = null;
+  localStorage.removeItem('supabase_config');
+};
 
 export const notifyChange = () => {
   console.log('🔔 Broadcasting data update...');
