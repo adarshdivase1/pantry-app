@@ -71,15 +71,18 @@ export const getItems = async (): Promise<PantryItem[]> => {
           console.error("Supabase error", error);
           return [];
       }
-      // Map snake_case to camelCase if necessary, or ensure DB uses correct column names
-      // Assuming DB uses camelCase for simplicity based on provided SQL in settings
       return data.map((d: any) => ({
-          ...d,
-          addedDate: d.added_date || d.addedDate,
-          expiryDate: d.expiry_date || d.expiryDate
+          id: d.id,
+          name: d.name,
+          quantity: d.quantity,
+          unit: d.unit,
+          category: d.category,
+          addedDate: d.added_date,
+          expiryDate: d.expiry_date,
+          notes: d.notes,
+          imageUrl: d.image_url
       })) as PantryItem[];
   } else {
-    // Local Fallback
     const data = localStorage.getItem(ITEMS_KEY);
     return data ? JSON.parse(data) : [];
   }
@@ -123,7 +126,6 @@ export const addOrUpdateItem = async (newItem: Omit<PantryItem, 'id' | 'addedDat
             return { success: true, message: `Added ${newItem.name}` };
         }
     } else {
-        // Local Implementation
         if (existingItem) {
             existingItem.quantity += newItem.quantity;
             if (newItem.category !== Category.OTHER) existingItem.category = newItem.category;
@@ -165,9 +167,12 @@ export const getOrders = async (): Promise<Order[]> => {
       const { data, error } = await supabase!.from('orders').select('*').order('timestamp', { ascending: false });
       if (error) return [];
       return data.map((d: any) => ({
-          ...d,
-          roomNumber: d.room_number || d.roomNumber,
-          completedAt: d.completed_at || d.completedAt
+          id: d.id,
+          roomNumber: d.room_number,
+          items: d.items,
+          status: d.status,
+          timestamp: d.timestamp,
+          completedAt: d.completed_at
       })) as Order[];
   } else {
     const data = localStorage.getItem(ORDERS_KEY);
@@ -190,11 +195,6 @@ export const placeOrder = async (order: Order): Promise<{ success: boolean; erro
     }
 
     if (isCloud()) {
-        // Transactional updates are harder in client-side JS without RPC, 
-        // but we will do optimistic updates for simplicity or sequential.
-        // Ideally use a Postgres function `place_order` in Supabase.
-        
-        // 1. Insert Order
         const { error: orderError } = await supabase!.from('orders').insert([{
             room_number: order.roomNumber,
             items: order.items,
@@ -204,7 +204,6 @@ export const placeOrder = async (order: Order): Promise<{ success: boolean; erro
         
         if (orderError) return { success: false, error: orderError.message };
 
-        // 2. Deduct Stock (Best Effort)
         for (const orderItem of order.items) {
             const item = items.find(i => i.id === orderItem.itemId);
             if (item) {
@@ -216,7 +215,6 @@ export const placeOrder = async (order: Order): Promise<{ success: boolean; erro
         notifyChange();
         return { success: true };
     } else {
-        // Local
         const orders = await getOrders();
         for (const orderItem of order.items) {
             const item = items.find(i => i.id === orderItem.itemId);
@@ -256,13 +254,40 @@ export const getLowStockItems = async (threshold = 10): Promise<PantryItem[]> =>
 };
 
 // --- Seeding ---
-// Only runs for Local Storage to avoid messing up Cloud DB automatically
 export const seedInitialData = async () => {
-    if (isCloud()) return;
-    
     const existing = await getItems();
     if (existing.length > 0) return;
     
-    // ... (Use same seed data from before, just call saveItems equivalent)
-    // For brevity, we skip re-implementing full seed logic here as it's mainly for demo
+    const sampleItems = [
+        { name: 'Coffee', quantity: 50, unit: Unit.CUP, category: Category.BEVERAGES, expiryDate: '2025-12-31' },
+        { name: 'Tea Bags', quantity: 100, unit: Unit.PIECE, category: Category.BEVERAGES, expiryDate: '2025-12-31' },
+        { name: 'Bottled Water', quantity: 75, unit: Unit.BOTTLE, category: Category.BEVERAGES, expiryDate: '2026-01-31' },
+        { name: 'Orange Juice', quantity: 30, unit: Unit.BOTTLE, category: Category.BEVERAGES, expiryDate: '2025-01-15' },
+        { name: 'Soft Drinks', quantity: 60, unit: Unit.CAN, category: Category.BEVERAGES, expiryDate: '2025-06-30' },
+        { name: 'Chocolate Bar', quantity: 40, unit: Unit.PIECE, category: Category.SNACKS, expiryDate: '2025-08-01' },
+        { name: 'Potato Chips', quantity: 35, unit: Unit.PACK, category: Category.SNACKS, expiryDate: '2025-07-01' },
+        { name: 'Cookies', quantity: 45, unit: Unit.PACK, category: Category.SNACKS, expiryDate: '2025-05-15' },
+        { name: 'Nuts Mix', quantity: 25, unit: Unit.PACK, category: Category.SNACKS, expiryDate: '2025-09-01' },
+        { name: 'Energy Bar', quantity: 30, unit: Unit.PIECE, category: Category.SNACKS, expiryDate: '2025-10-01' },
+        { name: 'Sandwich', quantity: 20, unit: Unit.PIECE, category: Category.FOOD, expiryDate: '2024-11-20' },
+        { name: 'Fruit Salad', quantity: 15, unit: Unit.CUP, category: Category.FOOD, expiryDate: '2024-11-20' },
+        { name: 'Instant Noodles', quantity: 40, unit: Unit.CUP, category: Category.FOOD, expiryDate: '2025-12-01' },
+        { name: 'Notepads', quantity: 50, unit: Unit.PIECE, category: Category.STATIONERY, expiryDate: '2030-01-01' },
+        { name: 'Pens', quantity: 100, unit: Unit.PIECE, category: Category.STATIONERY, expiryDate: '2030-01-01' },
+        { name: 'Phone Charger', quantity: 15, unit: Unit.PIECE, category: Category.ELECTRONICS, expiryDate: '2030-01-01' },
+        { name: 'USB Cable', quantity: 20, unit: Unit.PIECE, category: Category.ELECTRONICS, expiryDate: '2030-01-01' },
+    ];
+
+    for (const item of sampleItems) {
+        await addOrUpdateItem(item);
+    }
+    
+    console.log('✅ Sample data seeded successfully!');
+};
+
+// Function to manually trigger seeding (useful for admin)
+export const forceSeedData = async () => {
+    const items = await getItems();
+    await Promise.all(items.map(item => deleteItem(item.id)));
+    await seedInitialData();
 };
