@@ -1,11 +1,12 @@
 import { PantryItem, Category, Unit, Order } from '../types';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 
 const ITEMS_KEY = 'pantry_service_items_v2';
 const ORDERS_KEY = 'pantry_service_orders_v2';
 const SUPABASE_CONFIG_KEY = 'pantry_supabase_config';
 
 let supabase: SupabaseClient | null = null;
+let realtimeChannel: RealtimeChannel | null = null;
 
 // --- Configuration ---
 
@@ -22,8 +23,13 @@ export const getSupabaseConfig = (): SupabaseConfig | null => {
 export const initSupabase = (config: SupabaseConfig) => {
   localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify(config));
   try {
-    supabase = createClient(config.url, config.key);
-    // Setup Realtime subscriptions if needed
+    supabase = createClient(config.url, config.key, {
+      realtime: {
+        params: {
+          eventsPerSecond: 10
+        }
+      }
+    });
     setupRealtime();
     return true;
   } catch (e) {
@@ -33,6 +39,10 @@ export const initSupabase = (config: SupabaseConfig) => {
 };
 
 export const disconnectSupabase = () => {
+    if (realtimeChannel) {
+        realtimeChannel.unsubscribe();
+        realtimeChannel = null;
+    }
     localStorage.removeItem(SUPABASE_CONFIG_KEY);
     supabase = null;
     notifyChange();
@@ -46,15 +56,52 @@ if (savedConfig) {
 
 const setupRealtime = () => {
     if (!supabase) return;
-    supabase
-        .channel('any')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'pantry_items' }, () => notifyChange())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => notifyChange())
-        .subscribe();
+    
+    // Unsubscribe from previous channel if exists
+    if (realtimeChannel) {
+        realtimeChannel.unsubscribe();
+    }
+    
+    console.log('🔄 Setting up real-time subscriptions...');
+    
+    // Create a single channel for all tables
+    realtimeChannel = supabase
+        .channel('db-changes')
+        .on(
+            'postgres_changes',
+            { 
+                event: '*', 
+                schema: 'public', 
+                table: 'pantry_items' 
+            },
+            (payload) => {
+                console.log('📦 Pantry items changed:', payload);
+                notifyChange();
+            }
+        )
+        .on(
+            'postgres_changes',
+            { 
+                event: '*', 
+                schema: 'public', 
+                table: 'orders' 
+            },
+            (payload) => {
+                console.log('🛎️ Orders changed:', payload);
+                notifyChange();
+            }
+        )
+        .subscribe((status) => {
+            console.log('Real-time subscription status:', status);
+            if (status === 'SUBSCRIBED') {
+                console.log('✅ Real-time sync is active!');
+            }
+        });
 }
 
 // --- Event System ---
 export const notifyChange = () => {
+  console.log('🔔 Broadcasting data update...');
   window.dispatchEvent(new Event('pantry-update'));
 };
 
@@ -108,7 +155,7 @@ export const addOrUpdateItem = async (newItem: Omit<PantryItem, 'id' | 'addedDat
                 .eq('id', existingItem.id);
             
             if (error) return { success: false, message: error.message };
-            notifyChange();
+            // Real-time will trigger notifyChange automatically
             return { success: true, message: `Restocked ${existingItem.name}` };
         } else {
             const { error } = await supabase!
@@ -122,7 +169,7 @@ export const addOrUpdateItem = async (newItem: Omit<PantryItem, 'id' | 'addedDat
                     expiry_date: newItem.expiryDate
                 }]);
             if (error) return { success: false, message: error.message };
-            notifyChange();
+            // Real-time will trigger notifyChange automatically
             return { success: true, message: `Added ${newItem.name}` };
         }
     } else {
@@ -151,13 +198,15 @@ export const addOrUpdateItem = async (newItem: Omit<PantryItem, 'id' | 'addedDat
 
 export const deleteItem = async (id: string) => {
     if (isCloud()) {
-        await supabase!.from('pantry_items').delete().eq('id', id);
+        const { error } = await supabase!.from('pantry_items').delete().eq('id', id);
+        if (error) console.error('Delete error:', error);
+        // Real-time will trigger notifyChange automatically
     } else {
         const items = await getItems();
         const updated = items.filter(i => i.id !== id);
         localStorage.setItem(ITEMS_KEY, JSON.stringify(updated));
+        notifyChange();
     }
-    notifyChange();
 };
 
 // --- Orders Management ---
@@ -165,7 +214,10 @@ export const deleteItem = async (id: string) => {
 export const getOrders = async (): Promise<Order[]> => {
   if (isCloud()) {
       const { data, error } = await supabase!.from('orders').select('*').order('timestamp', { ascending: false });
-      if (error) return [];
+      if (error) {
+          console.error("Get orders error:", error);
+          return [];
+      }
       return data.map((d: any) => ({
           id: d.id,
           roomNumber: d.room_number,
@@ -183,7 +235,7 @@ export const getOrders = async (): Promise<Order[]> => {
 export const placeOrder = async (order: Order): Promise<{ success: boolean; error?: string }> => {
     const items = await getItems();
 
-    // 1. Validate Stock (Common for both)
+    // 1. Validate Stock
     for (const orderItem of order.items) {
         const item = items.find(i => i.id === orderItem.itemId);
         if (!item) {
@@ -195,24 +247,38 @@ export const placeOrder = async (order: Order): Promise<{ success: boolean; erro
     }
 
     if (isCloud()) {
+        console.log('📝 Placing order:', order);
+        
+        // Insert Order
         const { error: orderError } = await supabase!.from('orders').insert([{
+            id: order.id,
             room_number: order.roomNumber,
             items: order.items,
             status: order.status,
             timestamp: order.timestamp
         }]);
         
-        if (orderError) return { success: false, error: orderError.message };
+        if (orderError) {
+            console.error('Order insert error:', orderError);
+            return { success: false, error: orderError.message };
+        }
 
+        // Deduct Stock
         for (const orderItem of order.items) {
             const item = items.find(i => i.id === orderItem.itemId);
             if (item) {
-                await supabase!.from('pantry_items')
+                const { error: updateError } = await supabase!.from('pantry_items')
                     .update({ quantity: item.quantity - orderItem.quantity })
                     .eq('id', item.id);
+                    
+                if (updateError) {
+                    console.error('Stock update error:', updateError);
+                }
             }
         }
-        notifyChange();
+        
+        console.log('✅ Order placed successfully!');
+        // Real-time will trigger notifyChange automatically
         return { success: true };
     } else {
         const orders = await getOrders();
@@ -232,10 +298,18 @@ export const updateOrderStatus = async (orderId: string, status: Order['status']
     const completedAt = (status === 'delivered' || status === 'cancelled') ? new Date().toISOString() : null;
     
     if (isCloud()) {
-        await supabase!.from('orders').update({ 
+        console.log(`🔄 Updating order ${orderId} to ${status}`);
+        const { error } = await supabase!.from('orders').update({ 
             status, 
             completed_at: completedAt 
         }).eq('id', orderId);
+        
+        if (error) {
+            console.error('Update status error:', error);
+        } else {
+            console.log('✅ Order status updated!');
+        }
+        // Real-time will trigger notifyChange automatically
     } else {
         const orders = await getOrders();
         const index = orders.findIndex(o => o.id === orderId);
@@ -244,8 +318,8 @@ export const updateOrderStatus = async (orderId: string, status: Order['status']
             if (completedAt) orders[index].completedAt = completedAt;
             localStorage.setItem(ORDERS_KEY, JSON.stringify(orders));
         }
+        notifyChange();
     }
-    notifyChange();
 };
 
 export const getLowStockItems = async (threshold = 10): Promise<PantryItem[]> => {
